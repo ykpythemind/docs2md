@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"path"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -87,7 +89,7 @@ func main() {
 	}
 
 	// todo 任意のものを選択
-	docId := "1vaZmqZXAjr9cTxPrz215ZAmj-HH4qDq-7k6ORByiU9s"
+	docId := "1KqZd2pXXTppIx6GaIAmdS80ax-eZX1Sp3bptmg3HMYg"
 	doc, err := srv.Documents.Get(docId).Do()
 	if err != nil {
 		log.Fatalf("Unable to retrieve data from document: %v", err)
@@ -104,7 +106,9 @@ func main() {
 	fmt.Printf("%+v\n", myDoc)
 	fmt.Println("---------")
 
-	myDoc.WriteFiles("tmp")
+	if err := myDoc.WriteFiles("tmp"); err != nil {
+		log.Fatalf("failed to output: %s", err)
+	}
 }
 
 type Element interface {
@@ -136,7 +140,7 @@ type ImageElement struct {
 func (e ImageElement) Markdown() string {
 	// temp
 	// 拡張子がわからん
-	return fmt.Sprintf("![%s](%s)\n", e.Image.Description, e.Image.ObjectID)
+	return fmt.Sprintf("![%s](%s.jpg)\n", e.Image.Description, e.Image.ObjectID)
 }
 
 func (e ImageElement) String() string {
@@ -184,7 +188,12 @@ func (d *Document) parseBody(elm *docs.StructuralElement) error {
 
 	for _, e := range paragraph.Elements {
 		if e.TextRun != nil {
-			d.add(TextElement{Body: e.TextRun.Content})
+			content := e.TextRun.Content
+			if paragraph.ParagraphStyle.NamedStyleType == "TITLE" {
+				d.add(Header1Element{Body: content})
+			} else {
+				d.add(TextElement{Body: content})
+			}
 			continue
 		}
 
@@ -232,7 +241,52 @@ func (d *Document) WriteFiles(dir string) error {
 		b.WriteString(elm.Markdown())
 	}
 
-	fmt.Println(b.String())
+	// fmt.Println(b.String())
+
+	f, err := os.OpenFile(path.Join(dir, fmt.Sprintf("%s.md", d.Title)), os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Write(b.Bytes()); err != nil {
+		return err
+	}
+
+	// download file
+	for _, elm := range d.Elements {
+		image, ok := elm.(*ImageElement)
+		if !ok {
+			continue
+		}
+
+		if err := download(*image, dir); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func download(image ImageElement, dir string) error {
+	// TODO: 先にダウンロードがいいか
+
+	resp, err := http.Get(image.Image.ContentURI)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// fname := strings.Replace(image.Image.ObjectID, ".", "_", -1)
+	fname := image.Image.ObjectID
+	f, err := os.OpenFile(path.Join(dir, fmt.Sprintf("%s.jpg", fname)), os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return err
+	}
 
 	return nil
 }
