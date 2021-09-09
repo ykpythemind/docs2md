@@ -85,8 +85,7 @@ func main() {
 		log.Fatalf("Unable to retrieve Docs client: %v", err)
 	}
 
-	// Prints the title of the requested doc:
-	// https://docs.google.com/document/d/195j9eDD3ccgjQRttHhJPymLJUCOUjs-jmwTrekvdjFE/edit
+	// todo 任意のものを選択
 	docId := "1vaZmqZXAjr9cTxPrz215ZAmj-HH4qDq-7k6ORByiU9s"
 	doc, err := srv.Documents.Get(docId).Do()
 	if err != nil {
@@ -108,7 +107,10 @@ type Element interface {
 	Markdown() string
 }
 
-type DocumentImage struct{}
+type DocumentImage struct {
+	ContentURI  string
+	Description string
+}
 
 type Header1Element struct {
 	Body string
@@ -122,18 +124,34 @@ type TextElement struct {
 	Body string
 }
 
+type ImageElement struct {
+	Image *DocumentImage
+}
+
+func (e ImageElement) Markdown() string {
+	// temp
+	return fmt.Sprintf("![%s](%s)\n", e.Image.Description, e.Image.ContentURI)
+}
+
+func (e ImageElement) String() string {
+	return e.Markdown()
+}
+
 func (e TextElement) Markdown() string {
 	return fmt.Sprintf("%s\n", e.Body)
 }
 
-// PageBreak
+// TODO: PageBreak
 
 type Document struct {
-	Elements []Element
-	Images   map[string]DocumentImage
+	Elements         []Element
+	Images           map[string]DocumentImage
+	originalDocument *docs.Document
 }
 
 func (d *Document) Parse(doc *docs.Document) error {
+	d.originalDocument = doc
+
 	for _, b := range doc.Body.Content {
 		err := d.parseBody(b)
 		if err != nil {
@@ -156,9 +174,14 @@ func (d *Document) parseBody(elm *docs.StructuralElement) error {
 	}
 
 	for _, e := range paragraph.Elements {
-		// inlineobjectは別途
 		if e.TextRun != nil {
 			d.add(TextElement{Body: e.TextRun.Content})
+			continue
+		}
+
+		if e.InlineObjectElement != nil {
+			d.handleInlineObjectElement(e.InlineObjectElement)
+			continue
 		}
 	}
 
@@ -167,4 +190,19 @@ func (d *Document) parseBody(elm *docs.StructuralElement) error {
 
 func (d *Document) add(elm Element) {
 	d.Elements = append(d.Elements, elm)
+}
+
+func (d *Document) handleInlineObjectElement(elm *docs.InlineObjectElement) {
+	if inlineObject, ok := d.originalDocument.InlineObjects[elm.InlineObjectId]; ok {
+		pro := inlineObject.InlineObjectProperties
+		if pro == nil {
+			return
+		}
+
+		if obj := pro.EmbeddedObject; obj != nil {
+			if im := obj.ImageProperties; im != nil {
+				d.add(&ImageElement{Image: &DocumentImage{ContentURI: im.ContentUri, Description: obj.Description}})
+			}
+		}
+	}
 }
