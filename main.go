@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -101,6 +102,9 @@ func main() {
 	}
 
 	fmt.Printf("%+v\n", myDoc)
+	fmt.Println("---------")
+
+	myDoc.WriteFiles("tmp")
 }
 
 type Element interface {
@@ -110,6 +114,7 @@ type Element interface {
 type DocumentImage struct {
 	ContentURI  string
 	Description string
+	ObjectID    string
 }
 
 type Header1Element struct {
@@ -130,7 +135,8 @@ type ImageElement struct {
 
 func (e ImageElement) Markdown() string {
 	// temp
-	return fmt.Sprintf("![%s](%s)\n", e.Image.Description, e.Image.ContentURI)
+	// 拡張子がわからん
+	return fmt.Sprintf("![%s](%s)\n", e.Image.Description, e.Image.ObjectID)
 }
 
 func (e ImageElement) String() string {
@@ -144,6 +150,7 @@ func (e TextElement) Markdown() string {
 // TODO: PageBreak
 
 type Document struct {
+	Title            string
 	Elements         []Element
 	Images           map[string]DocumentImage
 	originalDocument *docs.Document
@@ -151,6 +158,8 @@ type Document struct {
 
 func (d *Document) Parse(doc *docs.Document) error {
 	d.originalDocument = doc
+
+	d.Title = doc.Title
 
 	for _, b := range doc.Body.Content {
 		err := d.parseBody(b)
@@ -201,8 +210,29 @@ func (d *Document) handleInlineObjectElement(elm *docs.InlineObjectElement) {
 
 		if obj := pro.EmbeddedObject; obj != nil {
 			if im := obj.ImageProperties; im != nil {
-				d.add(&ImageElement{Image: &DocumentImage{ContentURI: im.ContentUri, Description: obj.Description}})
+				d.add(&ImageElement{Image: &DocumentImage{
+					ObjectID: inlineObject.ObjectId, ContentURI: im.ContentUri, Description: obj.Description,
+				}})
 			}
 		}
 	}
+}
+
+func (d *Document) WriteFiles(dir string) error {
+	i, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if !i.IsDir() {
+		return fmt.Errorf("%s is not directory", dir)
+	}
+
+	var b bytes.Buffer
+	for _, elm := range d.Elements {
+		b.WriteString(elm.Markdown())
+	}
+
+	fmt.Println(b.String())
+
+	return nil
 }
