@@ -95,4 +95,76 @@ func main() {
 	fmt.Printf("The title of the doc is: %s\n", doc.Title)
 	fmt.Printf("%+v\n", doc.InlineObjects)
 
+	myDoc := &Document{}
+
+	if err = myDoc.Parse(doc); err != nil {
+		log.Fatalf("failed to parse: %s", err)
+	}
+
+	fmt.Printf("%+v\n", myDoc)
+}
+
+type Element interface {
+	Markdown() string
+}
+
+type DocumentImage struct{}
+
+type Header1Element struct {
+	Body string
+}
+
+func (e Header1Element) Markdown() string {
+	return fmt.Sprintf("# %s\n", e.Body)
+}
+
+type TextElement struct {
+	Body string
+}
+
+func (e TextElement) Markdown() string {
+	return fmt.Sprintf("%s\n", e.Body)
+}
+
+// PageBreak
+
+type Document struct {
+	Elements []Element
+	Images   map[string]DocumentImage
+}
+
+func (d *Document) Parse(doc *docs.Document) error {
+	for _, b := range doc.Body.Content {
+		err := d.parseBody(b)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (d *Document) parseBody(elm *docs.StructuralElement) error {
+	if elm == nil {
+		return nil
+	}
+
+	// only parse Paragraph
+	paragraph := elm.Paragraph
+	if paragraph == nil {
+		return nil
+	}
+
+	for _, e := range paragraph.Elements {
+		// inlineobjectは別途
+		if e.TextRun != nil {
+			d.add(TextElement{Body: e.TextRun.Content})
+		}
+	}
+
+	return nil
+}
+
+func (d *Document) add(elm Element) {
+	d.Elements = append(d.Elements, elm)
 }
